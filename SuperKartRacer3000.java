@@ -8,8 +8,10 @@ public class SuperKartRacer3000 {
 	public static void main(String[] args) {
 		JFrame frame = new JFrame("Super Kart Racer 3000");
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		frame.setResizable(false);
-		frame.add(new GamePanel());
+		frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+		frame.setResizable(true);
+		GamePanel panel = new GamePanel();
+		frame.add(panel);
 		frame.pack();
 		frame.setLocationRelativeTo(null);
 		frame.setVisible(true);
