@@ -6,6 +6,10 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import javax.imageio.ImageIO;
 import javax.swing.JPanel;
 
 public class GamePanel extends JPanel implements KeyListener, Runnable {
@@ -30,9 +34,24 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
         track = new Track();
         karts = new Kart[2];
         double startAngle = track.getStartAngle();
+        // load kart sprite once
+        BufferedImage kartImg = null;
+        try {
+            kartImg = ImageIO.read(new File("f1carimage.png"));
+            if (kartImg != null) System.out.println("Loaded kart image: " + kartImg.getWidth() + "x" + kartImg.getHeight());
+        } catch (IOException e) {
+            System.err.println("Warning: could not load f1carimage.png: " + e.getMessage());
+        }
         for (int i = 0; i < karts.length; i++) {
             int[] start = track.getStartPosition(i, karts.length);
-            karts[i] = new Kart(start[0], start[1], i == 0 ? Color.RED : Color.BLUE);
+            // Kart constructor requires a color; choose different default colors per player
+            karts[i] = new Kart(start[0], start[1]);
+            if (kartImg != null) {
+                karts[i].setSprite(kartImg);
+                System.out.println("Set sprite on kart " + i + ": " + karts[i].isBoostActive());
+            } else {
+                System.out.println("No sprite available for kart " + i);
+            }
             karts[i].reset(start[0], start[1], startAngle);
         }
         laps = new int[karts.length];

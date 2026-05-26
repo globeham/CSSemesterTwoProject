@@ -1,19 +1,18 @@
-import java.awt.Color;
-import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.RadialGradientPaint;
-import java.awt.geom.Point2D;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import javax.imageio.ImageIO;
 
 public class Kart {
     private double x, y;
     private double prevX, prevY;
     private double angle;
     private double speed;
-    private Color color;
     private int boostTimer;
-    private static final int BASE_WIDTH = 60;
-    private static final int BASE_HEIGHT = 34;
+    private static final int BASE_WIDTH = 80;
+    private static final int BASE_HEIGHT = 60;
     private static final double MAX_SPEED = 4.8;
     private static final double OFF_TRACK_MAX_SPEED = 1.6;
     private static final double ACCELERATION = 0.14;
@@ -22,16 +21,34 @@ public class Kart {
     private static final double TURN_SPEED = Math.PI / 48;
     private static final int BOOST_DURATION = 50;
     private static final double BOOST_MULTIPLIER = 1.8;
+    private BufferedImage sprite = null;
 
-    public Kart(int x, int y, Color color) {
+    public Kart(int x, int y) {
         this.x = x;
         this.y = y;
         this.prevX = x; this.prevY = y;
-        this.color = color;
         this.angle = Math.PI / 2;
         this.speed = 0;
         this.boostTimer = 0;
     }
+
+    /**
+     * Try loading a PNG sprite from the given file path. If loading fails,
+     * the kart will fall back to the programmatic drawing.
+     */
+    public void loadSprite(String path) {
+        try {
+            sprite = ImageIO.read(new File(path));
+        } catch (IOException e) {
+            sprite = null;
+        }
+    }
+
+    public void setSprite(BufferedImage img) {
+        this.sprite = img;
+    }
+
+    public boolean hasSprite() { return this.sprite != null; }
 
     public double getY() { return y; }
     public double getPrevY() { return prevY; }
@@ -78,73 +95,20 @@ public class Kart {
 
     public void draw(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
-        // shadow
-        g2.setColor(new Color(0,0,0,120));
-        g2.fillOval((int)(x - BASE_WIDTH / 2 + 8), (int)(y - BASE_HEIGHT / 2 + 14), BASE_WIDTH, BASE_HEIGHT / 2);
 
         g2.translate((int)x, (int)y);
         g2.rotate(angle);
-        g2.translate(-BASE_WIDTH / 2, -BASE_HEIGHT / 2);
+        g2.translate(-BASE_WIDTH/2, -BASE_HEIGHT/2);
 
-        int bodyW = BASE_WIDTH;
-        int bodyH = BASE_HEIGHT;
-        GradientPaint gp = new GradientPaint(0, 0, color.brighter(), bodyW, bodyH, color.darker());
-        g2.setPaint(gp);
-        g2.fillRoundRect(0, 4, bodyW, bodyH - 8, 22, 22);
-
-        g2.setColor(color.darker().darker());
-        g2.fillRoundRect(6, bodyH / 2 - 8, 12, 16, 10, 10);
-        g2.fillRoundRect(bodyW - 18, bodyH / 2 - 8, 12, 16, 10, 10);
-
-        g2.setColor(new Color(255, 255, 255, 200));
-        g2.fillRoundRect(10, 8, bodyW - 20, 10, 12, 12);
-        g2.fillOval(bodyW - 24, 12, 10, 10);
-        g2.fillOval(bodyW - 24, bodyH - 22, 10, 10);
-
-        g2.setColor(new Color(255, 255, 255, 180));
-        g2.fillRect(bodyW / 2 - 6, 14, 12, bodyH - 28);
-
-        g2.setColor(color.darker());
-        g2.fillRoundRect(bodyW - 22, 6, 16, 8, 8, 8);
-        g2.fillRoundRect(bodyW - 30, 10, 24, 6, 6, 6);
-
-        g2.setColor(new Color(0, 0, 0, 220));
-        g2.setStroke(new java.awt.BasicStroke(2f, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
-        g2.drawRoundRect(0, 4, bodyW, bodyH - 8, 22, 22);
-        g2.setStroke(new java.awt.BasicStroke(1.5f, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_ROUND));
-        g2.drawLine(10, 14, bodyW - 14, 14);
-        g2.drawLine(10, bodyH - 14, bodyW - 14, bodyH - 14);
-
-        drawWheel(g2, 8, bodyH - 10, 14);
-        drawWheel(g2, bodyW - 22, bodyH - 10, 14);
-        drawWheel(g2, 8, -2, 14);
-        drawWheel(g2, bodyW - 22, -2, 14);
-
-        if (isBoostActive()) {
-            float cx = bodyW / 2f;
-            float cy = bodyH / 2f;
-            float radius = 32f;
-            RadialGradientPaint rg = new RadialGradientPaint(new Point2D.Float(cx, cy), radius,
-                    new float[]{0f, 1f},
-                    new Color[]{new Color(255, 190, 40, 200), new Color(255, 190, 40, 0)});
-            g2.setPaint(rg);
-            g2.fillOval((int)(cx - radius), (int)(cy - radius), (int)(radius * 2), (int)(radius * 2));
-            g2.setColor(new Color(255, 180, 40, 140));
-            for (int i = 0; i < 4; i++) {
-                g2.fillRoundRect(-bodyW + i * 14, bodyH / 2 - 7, 18, 12, 10, 10);
-            }
+        if (sprite == null) {
+            g2.dispose();
+            return;
         }
-
+        int imgW = BASE_WIDTH;
+        int imgH = BASE_HEIGHT;
+        g2.drawImage(sprite, 0, 0, imgW, imgH, null);
         g2.dispose();
     }
 
-    private void drawWheel(Graphics2D g2, int wx, int wy, int size) {
-        g2.setColor(new Color(22, 22, 22));
-        g2.fillOval(wx, wy, size, size);
-        g2.setColor(new Color(90, 90, 90));
-        g2.fillOval(wx + 3, wy + 3, size - 6, size - 6);
-        g2.setColor(new Color(180, 180, 180, 220));
-        g2.setStroke(new java.awt.BasicStroke(2f));
-        g2.drawOval(wx + 4, wy + 4, size - 8, size - 8);
-    }
+
 }
