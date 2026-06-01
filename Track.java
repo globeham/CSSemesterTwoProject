@@ -48,10 +48,19 @@ public class Track {
     // Load tile images from the sibling "Racetrack Tiled" folder.
     private void loadTiles() {
         try {
-            String base = ".." + File.separator + "Racetrack Tiled";
+            // Get the working directory and build paths from there
+            String workingDir = System.getProperty("user.dir");
+            String base = workingDir + File.separator + "Racetrack Tiled";
             File bg = new File(base + File.separator + "Background_Tiles" + File.separator + "Grass_Tile.png");
-            if (bg.exists()) grassTile = ImageIO.read(bg);
+            System.out.println("Looking for grass tile at: " + bg.getAbsolutePath());
+            if (bg.exists()) {
+                grassTile = ImageIO.read(bg);
+                System.out.println("Successfully loaded grass tile");
+            } else {
+                System.err.println("Grass tile not found at: " + bg.getAbsolutePath());
+            }
             File roadDir = new File(base + File.separator + "Road_01");
+            System.out.println("Looking for road tiles at: " + roadDir.getAbsolutePath());
             // Expect folders Road_01_Tile_01 .. Road_01_Tile_08
             roadMainTiles = new BufferedImage[9];
             if (roadDir.exists() && roadDir.isDirectory()) {

@@ -37,8 +37,15 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
         // load kart sprite once
         BufferedImage kartImg = null;
         try {
-            kartImg = ImageIO.read(new File("f1carimage.png"));
-            if (kartImg != null) System.out.println("Loaded kart image: " + kartImg.getWidth() + "x" + kartImg.getHeight());
+            String workingDir = System.getProperty("user.dir");
+            File kartFile = new File(workingDir + File.separator + "CSSemesterTwoProject" + File.separator + "f1carimage.png");
+            System.out.println("Looking for kart image at: " + kartFile.getAbsolutePath());
+            kartImg = ImageIO.read(kartFile);
+            if (kartImg != null) {
+                System.out.println("Loaded kart image: " + kartImg.getWidth() + "x" + kartImg.getHeight());
+            } else {
+                System.err.println("Warning: kart image returned null");
+            }
         } catch (IOException e) {
             System.err.println("Warning: could not load f1carimage.png: " + e.getMessage());
         }
