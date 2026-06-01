@@ -5,6 +5,11 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.GeneralPath;
 import java.awt.geom.Point2D;
+import java.awt.geom.AffineTransform;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import javax.imageio.ImageIO;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,14 +21,71 @@ public class Track {
     private int[][] boostPads;
     private long[] lastBoostTime;
     private static final long BOOST_COOLDOWN_MS = 700;
+    // Tile images
+    private BufferedImage grassTile;
+    private BufferedImage[] roadMainTiles;
+    // Grid-based track
+    private int tileSize = 64;
+    private int gridWidth = 12;
+    private int gridHeight = 9;
+    // 0 = grass, 1 = road
+    private int[][] grid;
 
     public Track() {
-        centerline = buildOvalWithTwists(400, 300, 300, 180, 200);
+        centerline = new ArrayList<>();
         outerPoints = new ArrayList<>();
         innerPoints = new ArrayList<>();
+
+        grid = new int[gridWidth][gridHeight];
+        buildGridTrack();
+
         buildBoundaryPoints();
         boostPads = placeboostPadsOnTrack();
         lastBoostTime = new long[boostPads.length];
+        loadTiles();
+    }
+
+    // Load tile images from the sibling "Racetrack Tiled" folder.
+    private void loadTiles() {
+        try {
+            String base = ".." + File.separator + "Racetrack Tiled";
+            File bg = new File(base + File.separator + "Background_Tiles" + File.separator + "Grass_Tile.png");
+            if (bg.exists()) grassTile = ImageIO.read(bg);
+            File roadDir = new File(base + File.separator + "Road_01");
+            // Expect folders Road_01_Tile_01 .. Road_01_Tile_08
+            roadMainTiles = new BufferedImage[9];
+            if (roadDir.exists() && roadDir.isDirectory()) {
+                for (int id = 1; id <= 8; id++) {
+                    String folder = String.format("Road_01_Tile_%02d", id);
+                    File d = new File(roadDir, folder);
+                    BufferedImage img = null;
+                    // Prefer Layers/Road_Main.png
+                    File layers = new File(d, "Layers");
+                    File main = new File(layers, "Road_Main.png");
+                    if (main.exists()) {
+                        try { img = ImageIO.read(main); } catch (IOException e) { img = null; }
+                    }
+                    // Fallback: any PNG directly in the folder
+                    if (img == null && d.exists() && d.isDirectory()) {
+                        File[] pngs = d.listFiles((f) -> f.getName().toLowerCase().endsWith(".png"));
+                        if (pngs != null && pngs.length > 0) {
+                            try { img = ImageIO.read(pngs[0]); } catch (IOException e) { img = null; }
+                        }
+                    }
+                    roadMainTiles[id] = img;
+                }
+                // find a default tile if some are missing
+                BufferedImage defaultTile = null;
+                for (int i=1;i<roadMainTiles.length;i++) if (roadMainTiles[i] != null) { defaultTile = roadMainTiles[i]; break; }
+                if (defaultTile != null) {
+                    for (int i=1;i<roadMainTiles.length;i++) if (roadMainTiles[i] == null) roadMainTiles[i] = defaultTile;
+                }
+            }
+        } catch (Exception e) {
+            // silent fallback to procedural rendering
+            grassTile = null;
+            roadMainTiles = null;
+        }
     }
 
     // Build sampled oval centerline with a couple of localized twists
@@ -57,6 +119,111 @@ public class Track {
             pts.add(new Point2D.Double(x, y));
         }
         return pts;
+    }
+
+    // Build a simple rectangular loop track on a grid and populate `centerline`.
+    private void buildGridTrack() {
+        // clear centerline
+        centerline.clear();
+        // offset to center the grid in 800x600 world
+        int worldW = 800, worldH = 600;
+        int offsetX = (worldW - gridWidth * tileSize) / 2;
+        int offsetY = (worldH - gridHeight * tileSize) / 2;
+
+        // initialize grid to grass
+        for (int x = 0; x < gridWidth; x++) for (int y = 0; y < gridHeight; y++) grid[x][y] = 0;
+
+        int left = 1, top = 1, right = gridWidth - 2, bottom = gridHeight - 2;
+        // top edge
+        for (int x = left; x <= right; x++) grid[x][top] = 1;
+        // right edge
+        for (int y = top; y <= bottom; y++) grid[right][y] = 1;
+        // bottom edge
+        for (int x = right; x >= left; x--) grid[x][bottom] = 1;
+        // left edge
+        for (int y = bottom; y >= top; y--) grid[left][y] = 1;
+
+        // Build ordered centerline by walking the outer loop only (clockwise)
+        for (int x = left; x <= right; x++) addCellCenterToCenterline(x, top, offsetX, offsetY);
+        for (int y = top + 1; y <= bottom; y++) addCellCenterToCenterline(right, y, offsetX, offsetY);
+        for (int x = right - 1; x >= left; x--) addCellCenterToCenterline(x, bottom, offsetX, offsetY);
+        for (int y = bottom - 1; y > top; y--) addCellCenterToCenterline(left, y, offsetX, offsetY);
+    }
+
+    private void addCellCenterToCenterline(int gx, int gy, int offsetX, int offsetY) {
+        double cx = offsetX + gx * tileSize + tileSize / 2.0;
+        double cy = offsetY + gy * tileSize + tileSize / 2.0;
+        Point2D.Double p = new Point2D.Double(cx, cy);
+        // avoid adding nearly-duplicate consecutive points
+        if (centerline.isEmpty()) centerline.add(p);
+        else {
+            Point2D.Double last = centerline.get(centerline.size() - 1);
+            if (Math.hypot(last.x - p.x, last.y - p.y) > 1.0) centerline.add(p);
+        }
+    }
+
+    // Compute neighbor mask and map to a road tile id (1..8). Bits: up=1,right=2,down=4,left=8
+    private int getTileIdForCell(int gx, int gy) {
+        int mask = 0;
+        if (gy - 1 >= 0 && grid[gx][gy - 1] == 1) mask |= 1; // up
+        if (gx + 1 < gridWidth && grid[gx + 1][gy] == 1) mask |= 2; // right
+        if (gy + 1 < gridHeight && grid[gx][gy + 1] == 1) mask |= 4; // down
+        if (gx - 1 >= 0 && grid[gx - 1][gy] == 1) mask |= 8; // left
+
+        switch (mask) {
+            case 10: // left+right
+                return 1; // Tile_01 -> horizontal
+            case 5: // up+down
+                return 2; // Tile_02 -> vertical
+            case 3: // up+right
+                return 3; // corner
+            case 6: // right+down
+                return 4;
+            case 12: // down+left
+                return 5;
+            case 9: // left+up
+                return 6;
+            case 7: // up+right+down
+                return 7; // T-join
+            case 13: // up+down+left
+                return 8;
+            default:
+                // single connection or isolated: default to straight (1)
+                if (mask == 2 || mask == 8) return 1;
+                if (mask == 1 || mask == 4) return 2;
+                return 1;
+        }
+    }
+
+    // Return {tileId, rotationDegrees} where tileId uses the loaded roadMainTiles index.
+    // We'll use tile 3 as straight and tile 1 as corner (rotated).
+    private int[] getTileAndRotation(int gx, int gy) {
+        int mask = 0;
+        if (gy - 1 >= 0 && grid[gx][gy - 1] == 1) mask |= 1; // up
+        if (gx + 1 < gridWidth && grid[gx + 1][gy] == 1) mask |= 2; // right
+        if (gy + 1 < gridHeight && grid[gx][gy + 1] == 1) mask |= 4; // down
+        if (gx - 1 >= 0 && grid[gx - 1][gy] == 1) mask |= 8; // left
+
+        // Straight horizontal
+        if (mask == 10) return new int[]{3, 0}; // tile_03 horizontal
+        // Straight vertical
+        if (mask == 5) return new int[]{3, 90}; // tile_03 rotated 90
+
+        // Corners: use tile_01 rotated accordingly
+        if (mask == 3) return new int[]{1, 0};   // up + right
+        if (mask == 6) return new int[]{1, 90};  // right + down
+        if (mask == 12) return new int[]{1, 180}; // down + left
+        if (mask == 9) return new int[]{1, 270}; // left + up
+
+        // Fallbacks: for T-joins or single connections, prefer straight
+        if ((mask & 3) == 3 || (mask & 6) == 6 || (mask & 12) == 12 || (mask & 9) == 9) {
+            return new int[]{1, 0};
+        }
+        if ((mask & 10) == 10) return new int[]{3, 0};
+        if ((mask & 5) == 5) return new int[]{3, 90};
+
+        // default to straight horizontal
+        return new int[]{3, 0};
     }
 
     /**
@@ -238,32 +405,66 @@ public class Track {
         Graphics2D g2 = (Graphics2D) g;
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // --- Background grass ---
-        g2.setColor(new Color(34, 120, 34));
-        g2.fillRect(0, 0, 800, 600);
+        // --- Background (tiled grass if available) ---
+        if (grassTile != null) {
+            int tw = grassTile.getWidth();
+            int th = grassTile.getHeight();
+            for (int x = 0; x < 800; x += tw) {
+                for (int y = 0; y < 600; y += th) {
+                    g2.drawImage(grassTile, x, y, null);
+                }
+            }
+        } else {
+            g2.setColor(new Color(34, 120, 34));
+            g2.fillRect(0, 0, 800, 600);
+        }
 
         // --- Build outer and inner closed paths ---
         GeneralPath outerPath = buildPath(outerPoints);
         GeneralPath innerPath = buildPath(innerPoints);
 
-        // --- Asphalt (fill outer, then punch out inner with Even-Odd rule) ---
-        GeneralPath trackShape = new GeneralPath(GeneralPath.WIND_EVEN_ODD);
-        trackShape.append(outerPath, false);
-        trackShape.append(innerPath, false);
-        g2.setColor(new Color(45, 45, 45));
-        g2.fill(trackShape);
+        // --- Road: draw tiles from the grid if available, otherwise procedural asphalt ---
+        int worldW = 800, worldH = 600;
+        int offsetX = (worldW - gridWidth * tileSize) / 2;
+        int offsetY = (worldH - gridHeight * tileSize) / 2;
 
-        // --- Track edge borders ---
-        g2.setStroke(new BasicStroke(3f));
-        g2.setColor(new Color(200, 200, 200));
-        g2.draw(outerPath);
-        g2.draw(innerPath);
+        if (roadMainTiles != null) {
+            for (int gx = 0; gx < gridWidth; gx++) {
+                for (int gy = 0; gy < gridHeight; gy++) {
+                    int px = offsetX + gx * tileSize;
+                    int py = offsetY + gy * tileSize;
+                    if (grid[gx][gy] == 1) {
+                        int[] tr = getTileAndRotation(gx, gy);
+                        int id = tr[0]; int rot = tr[1];
+                        BufferedImage tileImg = (id >= 1 && id < roadMainTiles.length) ? roadMainTiles[id] : null;
+                        if (tileImg != null) {
+                            int iw = tileImg.getWidth();
+                            int ih = tileImg.getHeight();
+                            int m = Math.max(4, Math.min(12, Math.min(iw, ih) / 16));
+                            BufferedImage src = tileImg.getSubimage(m, m, iw - 2*m, ih - 2*m);
+                            AffineTransform at = new AffineTransform();
+                            at.translate(px + tileSize/2.0, py + tileSize/2.0);
+                            at.rotate(Math.toRadians(rot));
+                            at.scale(tileSize / (double) src.getWidth(), tileSize / (double) src.getHeight());
+                            at.translate(-src.getWidth()/2.0, -src.getHeight()/2.0);
+                            g2.drawImage(src, at, null);
+                            
+                        } else { g2.setColor(new Color(45,45,45)); g2.fillRect(px, py, tileSize, tileSize); }
+                    }
+                }
+            }
+        } else {
+            // fallback: procedural asphalt and borders
+            GeneralPath trackShape = new GeneralPath(GeneralPath.WIND_EVEN_ODD);
+            trackShape.append(outerPath, false);
+            trackShape.append(innerPath, false);
+            g2.setColor(new Color(45, 45, 45));
+            g2.fill(trackShape);
 
-        // --- Dashed white centerline ---
-        g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
-                10f, new float[]{12f, 14f}, 0f));
-        g2.setColor(new Color(255, 255, 255, 160));
-        g2.draw(buildPath(centerline));
+            // no borders for tiled cohesive look
+        }
+
+        // (centerline rendering removed for a cohesive tiled look)
 
         // --- Start/finish line ---
         drawStartLine(g2);
