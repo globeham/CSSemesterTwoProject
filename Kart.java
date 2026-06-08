@@ -1,3 +1,4 @@
+import java.awt.Color;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.image.BufferedImage;
@@ -101,12 +102,11 @@ public class Kart {
         g2.translate(-BASE_WIDTH/2, -BASE_HEIGHT/2);
 
         if (sprite == null) {
-            g2.dispose();
-            return;
+            g2.setColor(Color.RED);
+            g2.fillRect(0, 0, BASE_WIDTH, BASE_HEIGHT);
+        } else {
+            g2.drawImage(sprite, 0, 0, BASE_WIDTH, BASE_HEIGHT, null);
         }
-        int imgW = BASE_WIDTH;
-        int imgH = BASE_HEIGHT;
-        g2.drawImage(sprite, 0, 0, imgW, imgH, null);
         g2.dispose();
     }
 
