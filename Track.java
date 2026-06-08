@@ -14,7 +14,11 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Track {
-    private static final int TRACK_HALF_WIDTH = 70; // half-width on each side of centerline
+    private static final int TRACK_HALF_WIDTH = 70; // half-width on each side of centerline (used for start line visuals)
+    // Index in centerline[] that acts as the start/finish line.
+    // Must sit on the horizontal stretch of row 1, well to the right of col 2,
+    // so that cars coming from col 2 (x≈176) have negative signed distance.
+    private static final int START_LINE_INDEX = 3;
     private final List<Point2D.Double> centerline;
     private final List<Point2D.Double> outerPoints;
     private final List<Point2D.Double> innerPoints;
@@ -30,6 +34,8 @@ public class Track {
     private int gridHeight = 9;
     // 0 = grass, 1 = road
     private int[][] grid;
+    // World offset for the grid (computed once in buildGridTrack)
+    private int gridOffsetX, gridOffsetY;
 
     public Track() {
         centerline = new ArrayList<>();
@@ -130,33 +136,61 @@ public class Track {
         return pts;
     }
 
-    // Build a simple rectangular loop track on a grid and populate `centerline`.
+    // Build a winding track on the grid and populate `centerline` in order.
+    //
+    // Track shape (12-wide x 9-tall grid, 0=grass, 1=road):
+    //   row 1: cols 2-8  (top horizontal)
+    //   col 8: rows 1-3  (right drop)
+    //   row 3: cols 8-10 (mid-right horizontal)
+    //   col10: rows 3-7  (far-right vertical)
+    //   row 7: cols 4-10 (bottom horizontal)
+    //   col 4: rows 5-7  (left bump vertical)
+    //   row 5: cols 2-4  (mid-left horizontal)
+    //   col 2: rows 1-5  (left vertical)
+    //
+    // Clockwise centerline walk starts at (2,1) which is in the top-left corner.
+    // The start/finish line is placed at START_LINE_INDEX=3 (cell 5,1) so that
+    // cars coming from col 2 (x≈176) have negative signed distance and trigger
+    // the crossing detector on every lap.
     private void buildGridTrack() {
-        // clear centerline
         centerline.clear();
-        // offset to center the grid in 800x600 world
         int worldW = 800, worldH = 600;
-        int offsetX = (worldW - gridWidth * tileSize) / 2;
-        int offsetY = (worldH - gridHeight * tileSize) / 2;
+        gridOffsetX = (worldW - gridWidth * tileSize) / 2;
+        gridOffsetY = (worldH - gridHeight * tileSize) / 2;
 
-        // initialize grid to grass
         for (int x = 0; x < gridWidth; x++) for (int y = 0; y < gridHeight; y++) grid[x][y] = 0;
 
-        int left = 1, top = 1, right = gridWidth - 2, bottom = gridHeight - 2;
-        // top edge
-        for (int x = left; x <= right; x++) grid[x][top] = 1;
-        // right edge
-        for (int y = top; y <= bottom; y++) grid[right][y] = 1;
-        // bottom edge
-        for (int x = right; x >= left; x--) grid[x][bottom] = 1;
-        // left edge
-        for (int y = bottom; y >= top; y--) grid[left][y] = 1;
+        // top horizontal
+        for (int x = 2; x <= 8; x++) grid[x][1] = 1;
+        // right drop (row 1 already set)
+        for (int y = 2; y <= 3; y++) grid[8][y] = 1;
+        // mid-right horizontal (col 8 row 3 already set)
+        for (int x = 9; x <= 10; x++) grid[x][3] = 1;
+        // far-right vertical (row 3 already set)
+        for (int y = 4; y <= 7; y++) grid[10][y] = 1;
+        // bottom horizontal (col 10 already set)
+        for (int x = 4; x <= 9; x++) grid[x][7] = 1;
+        // left bump vertical (row 7 already set)
+        for (int y = 5; y <= 6; y++) grid[4][y] = 1;
+        // mid-left horizontal (col 4 already set)
+        for (int x = 2; x <= 3; x++) grid[x][5] = 1;
+        // left vertical (row 5 already set)
+        for (int y = 1; y <= 4; y++) grid[2][y] = 1;
 
-        // Build ordered centerline by walking the outer loop only (clockwise)
-        for (int x = left; x <= right; x++) addCellCenterToCenterline(x, top, offsetX, offsetY);
-        for (int y = top + 1; y <= bottom; y++) addCellCenterToCenterline(right, y, offsetX, offsetY);
-        for (int x = right - 1; x >= left; x--) addCellCenterToCenterline(x, bottom, offsetX, offsetY);
-        for (int y = bottom - 1; y > top; y--) addCellCenterToCenterline(left, y, offsetX, offsetY);
+        // Ordered clockwise centerline walk
+        for (int x = 2; x <= 8; x++) addCellCenter(x, 1);           // top →
+        for (int y = 2; y <= 3; y++) addCellCenter(8, y);            // right drop ↓
+        for (int x = 9; x <= 10; x++) addCellCenter(x, 3);           // mid-right →
+        for (int y = 4; y <= 7; y++) addCellCenter(10, y);           // far-right ↓
+        for (int x = 9; x >= 4; x--) addCellCenter(x, 7);            // bottom ←
+        for (int y = 6; y >= 5; y--) addCellCenter(4, y);            // left bump ↑
+        for (int x = 3; x >= 2; x--) addCellCenter(x, 5);            // mid-left ←
+        for (int y = 4; y >= 2; y--) addCellCenter(2, y);            // left vertical ↑
+        // (2,1) is already index 0 — loop closed
+    }
+
+    private void addCellCenter(int gx, int gy) {
+        addCellCenterToCenterline(gx, gy, gridOffsetX, gridOffsetY);
     }
 
     private void addCellCenterToCenterline(int gx, int gy, int offsetX, int offsetY) {
@@ -301,57 +335,47 @@ public class Track {
      * Players are spread sideways across the track width.
      */
     public int[] getStartPosition(int playerIdx, int totalPlayers) {
-        Point2D.Double p = centerline.get(0);
+        // Place cars just before the start/finish line (one cell to the left of START_LINE_INDEX)
+        Point2D.Double p = centerline.get(START_LINE_INDEX - 1);
         double angle = getStartAngle();
-        // Perpendicular to the track direction
         double px = -Math.sin(angle);
         double py =  Math.cos(angle);
-        double spacing = (TRACK_HALF_WIDTH * 1.6) / Math.max(1, totalPlayers - 1);
+        // Tighter spread to fit two cars side-by-side in one tile
+        double spacing = tileSize * 0.5;
         double offset = playerIdx * spacing - (totalPlayers - 1) * spacing / 2.0;
         return new int[]{ (int)(p.x + px * offset), (int)(p.y + py * offset) };
     }
 
-    /** Angle of the track at the start line (radians). */
+    /** Angle of the track at the start/finish line (radians). */
     public double getStartAngle() {
-        Point2D.Double a = centerline.get(0);
-        Point2D.Double b = centerline.get(1);
+        Point2D.Double a = centerline.get(START_LINE_INDEX);
+        Point2D.Double b = centerline.get(START_LINE_INDEX + 1);
         return Math.atan2(b.y - a.y, b.x - a.x);
     }
 
-    /** Signed distance from the start/finish line. Negative = before, positive = after. */
+    /**
+     * Signed distance along the track's forward direction from the start/finish line.
+     * Negative = before the line, positive = past it.
+     */
     public double getStartLineSignedDistance(double x, double y) {
-        Point2D.Double a = centerline.get(0);
-        Point2D.Double b = centerline.get(1);
+        Point2D.Double a = centerline.get(START_LINE_INDEX);
+        Point2D.Double b = centerline.get(START_LINE_INDEX + 1);
         double tx = b.x - a.x, ty = b.y - a.y;
         double tlen = Math.hypot(tx, ty);
         if (tlen == 0) return 0;
         tx /= tlen; ty /= tlen;
-        double nx = -ty, ny = tx;
-        return (x - a.x) * nx + (y - a.y) * ny;
+        // Project onto the forward (tangent) direction — negative means "before the line"
+        return (x - a.x) * tx + (y - a.y) * ty;
     }
 
-    /** True if point (x,y) is within TRACK_HALF_WIDTH of the centerline. */
+    /** True if the grid cell at (x,y) is a road tile. */
     public boolean isOnTrack(double x, double y) {
-        double minDist = Double.MAX_VALUE;
-        int n = centerline.size();
-        for (int i = 0; i < n; i++) {
-            Point2D.Double a = centerline.get(i);
-            Point2D.Double b = centerline.get((i + 1) % n);
-            double d = pointToSegmentDistance(x, y, a.x, a.y, b.x, b.y);
-            if (d < minDist) minDist = d;
-        }
-        return minDist <= TRACK_HALF_WIDTH;
+        int gx = (int)((x - gridOffsetX) / tileSize);
+        int gy = (int)((y - gridOffsetY) / tileSize);
+        if (gx < 0 || gx >= gridWidth || gy < 0 || gy >= gridHeight) return false;
+        return grid[gx][gy] == 1;
     }
 
-    private double pointToSegmentDistance(double px, double py,
-                                          double x1, double y1,
-                                          double x2, double y2) {
-        double dx = x2 - x1, dy = y2 - y1;
-        double lenSq = dx * dx + dy * dy;
-        if (lenSq == 0) return Math.hypot(px - x1, py - y1);
-        double t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lenSq));
-        return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
-    }
 
     /**
      * Returns true (and records the time) when a car drives over a boost pad.
@@ -377,29 +401,25 @@ public class Track {
      */
     public boolean crossedStartLine(double prevX, double prevY,
                                     double x, double y, double carAngle) {
-        Point2D.Double a = centerline.get(0);
-        Point2D.Double b = centerline.get(1);
+        Point2D.Double a = centerline.get(START_LINE_INDEX);
+        Point2D.Double b = centerline.get(START_LINE_INDEX + 1);
 
-        // Track tangent direction at start
+        // Forward direction (tangent) at the start/finish line
         double tx = b.x - a.x, ty = b.y - a.y;
         double tlen = Math.hypot(tx, ty);
         if (tlen == 0) return false;
         tx /= tlen; ty /= tlen;
 
-        // Normal pointing "forward" across the line
-        double nx = -ty, ny = tx;
+        // Project positions onto the forward direction
+        double prevSigned = (prevX - a.x) * tx + (prevY - a.y) * ty;
+        double currSigned = (x    - a.x) * tx + (y    - a.y) * ty;
 
-        // Signed distance of prev and current position from the start line
-        double prevSigned = (prevX - a.x) * nx + (prevY - a.y) * ny;
-        double currSigned = (x    - a.x) * nx + (y    - a.y) * ny;
-
-        // Check that the car crossed from negative to positive (forward direction)
         if (prevSigned < 0 && currSigned >= 0) {
-            Point2D.Double o = outerPoints.get(0);
-            Point2D.Double in = innerPoints.get(0);
-            double distToLine = pointToSegmentDistance(x, y, o.x, o.y, in.x, in.y);
-            if (distToLine > 52) return false;
-            // Also verify car is heading in roughly the same direction as the track
+            // Car must be laterally close to the start/finish line
+            double nx = -ty, ny = tx;
+            double lateral = Math.abs((x - a.x) * nx + (y - a.y) * ny);
+            if (lateral > tileSize) return false;
+            // Car must be heading the right way
             double carDot = Math.cos(carAngle) * tx + Math.sin(carAngle) * ty;
             return carDot > 0;
         }

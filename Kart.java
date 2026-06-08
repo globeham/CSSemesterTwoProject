@@ -12,12 +12,12 @@ public class Kart {
     private double angle;
     private double speed;
     private int boostTimer;
-    private static final int BASE_WIDTH = 80;
-    private static final int BASE_HEIGHT = 60;
-    private static final double MAX_SPEED = 4.8;
-    private static final double OFF_TRACK_MAX_SPEED = 1.6;
-    private static final double ACCELERATION = 0.14;
-    private static final double BRAKE_DECEL = 0.22;
+    private static final int BASE_WIDTH = 30;
+    private static final int BASE_HEIGHT = 20;
+    private static final double MAX_SPEED = 2.5;
+    private static final double OFF_TRACK_MAX_SPEED = 0.5;
+    private static final double ACCELERATION = 0.08;
+    private static final double BRAKE_DECEL = 0.14;
     private static final double FRICTION = 0.06;
     private static final double TURN_SPEED = Math.PI / 48;
     private static final int BOOST_DURATION = 50;
@@ -62,6 +62,10 @@ public class Kart {
     public boolean isBoostActive() { return boostTimer > 0; }
 
     public void applyBoost() { boostTimer = BOOST_DURATION; }
+
+    public void setX(double x) { this.x = x; }
+    public void setY(double y) { this.y = y; }
+    public void setSpeed(double s) { this.speed = s; }
 
     public void reset(int x, int y, double angle) {
         this.x = x; this.y = y; this.prevX = x; this.prevY = y; this.angle = angle; this.speed = 0; this.boostTimer = 0;

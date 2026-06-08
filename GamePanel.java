@@ -22,7 +22,9 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
     private boolean paused = false;
     private boolean showStartMenu = true;
     private int[] laps;
-    private boolean[] canScoreLap;
+    private long[] lastLapTime;
+    // Minimum milliseconds between consecutive lap scores — forces a full circuit
+    private static final long MIN_LAP_INTERVAL_MS = 5000;
     private int totalLaps = 3;
     private int countdown = 4;
     private boolean raceStarted = false;
@@ -62,8 +64,7 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
             karts[i].reset(start[0], start[1], startAngle);
         }
         laps = new int[karts.length];
-        canScoreLap = new boolean[karts.length];
-        for (int i = 0; i < karts.length; i++) canScoreLap[i] = true;
+        lastLapTime = new long[karts.length];
         keys = new boolean[256];
         setFocusable(true);
         requestFocusInWindow();
@@ -157,7 +158,7 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
             int[] start = track.getStartPosition(i, karts.length);
             karts[i].reset(start[0], start[1], startAngle);
             laps[i] = 0;
-            canScoreLap[i] = true;
+            lastLapTime[i] = 0;
         }
         countdown = 4; raceStarted = false; raceOver = false; winnerIndex = -1; showStartMenu = true;
     }
@@ -178,17 +179,25 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
                         double px = karts[i].getPrevX();
                         double py = karts[i].getPrevY();
                         karts[i].update(acc, br, l, r, onTrack);
+
+                        // Hard boundary: revert position if car left the track
+                        if (!track.isOnTrack(karts[i].getX(), karts[i].getY())) {
+                            karts[i].setX(px);
+                            karts[i].setY(py);
+                            karts[i].setSpeed(0);
+                        }
+
                         if (track.checkBoost(karts[i].getX(), karts[i].getY())) karts[i].applyBoost();
 
-                        double currentSigned = track.getStartLineSignedDistance(karts[i].getX(), karts[i].getY());
-                        if (track.crossedStartLine(px, py, karts[i].getX(), karts[i].getY(), karts[i].getAngle())
-                                && canScoreLap[i]) {
-                            laps[i] = Math.min(laps[i] + 1, totalLaps);
-                            canScoreLap[i] = false;
-                            if (laps[i] >= totalLaps) { raceOver=true; winnerIndex=i; }
-                        }
-                        if (currentSigned <= 0) {
-                            canScoreLap[i] = true;
+                        // Time-gated lap scoring: must have been at least MIN_LAP_INTERVAL_MS
+                        // since the last lap (prevents double-counting on a single crossing)
+                        if (track.crossedStartLine(px, py, karts[i].getX(), karts[i].getY(), karts[i].getAngle())) {
+                            long now = System.currentTimeMillis();
+                            if (now - lastLapTime[i] >= MIN_LAP_INTERVAL_MS) {
+                                laps[i] = Math.min(laps[i] + 1, totalLaps);
+                                lastLapTime[i] = now;
+                                if (laps[i] >= totalLaps) { raceOver = true; winnerIndex = i; }
+                            }
                         }
 
                         karts[i].setPrevX(karts[i].getX());
