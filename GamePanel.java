@@ -169,7 +169,16 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
         while (true) {
             if (!showStartMenu && !paused && !raceOver) {
                 if (!raceStarted && countdown > 0) {
-                    long now = System.currentTimeMillis(); if (now - lastCountdown >= 1000) { countdown--; lastCountdown = now; if (countdown==0) raceStarted=true; }
+                    long now = System.currentTimeMillis();
+                    if (now - lastCountdown >= 1000) {
+                        countdown--;
+                        lastCountdown = now;
+                        if (countdown == 0) {
+                            raceStarted = true;
+                            // Stamp so the first lap requires a genuine full circuit
+                            for (int j = 0; j < karts.length; j++) lastLapTime[j] = now;
+                        }
+                    }
                 } else if (raceStarted) {
                     for (int i=0;i<karts.length;i++) {
                         boolean onTrack = track.isOnTrack(karts[i].getX(), karts[i].getY());
@@ -180,11 +189,28 @@ public class GamePanel extends JPanel implements KeyListener, Runnable {
                         double py = karts[i].getPrevY();
                         karts[i].update(acc, br, l, r, onTrack);
 
-                        // Hard boundary: revert position if car left the track
+                        // Wall collision response — no angle flipping (causes visual glitches).
+                        // Instead: try to slide along whichever axis is unblocked.
+                        // If completely blocked (head-on), reverse speed so the car
+                        // visibly bounces back along the direction it was already facing.
                         if (!track.isOnTrack(karts[i].getX(), karts[i].getY())) {
-                            karts[i].setX(px);
-                            karts[i].setY(py);
-                            karts[i].setSpeed(0);
+                            double newX = karts[i].getX();
+                            double newY = karts[i].getY();
+                            double spd  = karts[i].getSpeed();
+                            if (track.isOnTrack(px, newY)) {
+                                // X movement was the problem; slide along Y
+                                karts[i].setX(px);
+                                karts[i].setSpeed(spd * 0.6);
+                            } else if (track.isOnTrack(newX, py)) {
+                                // Y movement was the problem; slide along X
+                                karts[i].setY(py);
+                                karts[i].setSpeed(spd * 0.6);
+                            } else {
+                                // Head-on or corner: full revert, small backward bounce
+                                karts[i].setX(px);
+                                karts[i].setY(py);
+                                karts[i].setSpeed(-spd * 0.35);
+                            }
                         }
 
                         if (track.checkBoost(karts[i].getX(), karts[i].getY())) karts[i].applyBoost();
