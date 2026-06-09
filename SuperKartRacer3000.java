@@ -1,5 +1,4 @@
 /*
-File will be the main runner for the game
  */
 
 import javax.swing.JFrame;
